@@ -1340,6 +1340,7 @@ func containsHash(arr []common.Hash, match common.Hash) bool {
 	return false
 }
 
+// This also checks that the tx is valid for a given header baseFee
 func (w *worker) txFeePrice(tx *types.Transaction, header *types.Header) (*big.Int, error) {
 	if w.chainConfig.IsLondon(header.Number) {
 		return tx.EffectiveTip(header.BaseFee)
@@ -1359,6 +1360,10 @@ func (w *worker) computeBundleGas(bundle types.MevBundle, parent *types.Block, h
 	ethSentToCoinbase := new(big.Int)
 
 	for i, tx := range bundle.Txs {
+		if tx.FeeCap().Cmp(header.BaseFee) == -1 {
+			return simulatedBundle{}, types.ErrFeeCapTooLow
+		}
+
 		state.Prepare(tx.Hash(), common.Hash{}, i+currentTxCount)
 		coinbaseBalanceBefore := state.GetBalance(w.coinbase)
 
