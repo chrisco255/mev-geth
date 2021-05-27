@@ -801,7 +801,12 @@ func (w *worker) commitTransaction(tx *types.Transaction, coinbase common.Addres
 	w.current.receipts = append(w.current.receipts, receipt)
 
 	gasUsed := new(big.Int).SetUint64(receipt.GasUsed)
-	w.current.profit.Add(w.current.profit, gasUsed.Mul(gasUsed, tx.GasPrice()))
+	gasPrice, err := w.txFeePrice(tx, w.current.header)
+	if err != nil {
+		w.current.state.RevertToSnapshot(snap)
+		return nil, err
+	}
+	w.current.profit.Add(w.current.profit, gasUsed.Mul(gasUsed, gasPrice))
 
 	return receipt.Logs, nil
 }
@@ -1335,6 +1340,15 @@ func containsHash(arr []common.Hash, match common.Hash) bool {
 	return false
 }
 
+func (w *worker) txFeePrice(tx *types.Transaction, header *types.Header) (*big.Int, error) {
+	if w.chainConfig.IsLondon(header.Number) {
+		return tx.EffectiveTip(header.BaseFee)
+
+	}
+
+	return tx.GasPrice(), nil
+}
+
 // Compute the adjusted gas price for a whole bundle
 // Done by calculating all gas spent, adding transfers to the coinbase, and then dividing by gas used
 func (w *worker) computeBundleGas(bundle types.MevBundle, parent *types.Block, header *types.Header, state *state.StateDB, gasPool *core.GasPool, pendingTxs map[common.Address]types.Transactions, currentTxCount int) (simulatedBundle, error) {
@@ -1379,7 +1393,11 @@ func (w *worker) computeBundleGas(bundle types.MevBundle, parent *types.Block, h
 		if !txInPendingPool {
 			// If tx is not in pending pool, count the gas fees
 			gasUsed := new(big.Int).SetUint64(receipt.GasUsed)
-			gasFeesTx := gasUsed.Mul(gasUsed, tx.GasPrice())
+			gasPrice, err := w.txFeePrice(tx, header)
+			if err != nil {
+				return simulatedBundle{}, err
+			}
+			gasFeesTx := gasUsed.Mul(gasUsed, gasPrice)
 			gasFees.Add(gasFees, gasFeesTx)
 
 			coinbaseBalanceAfter := state.GetBalance(w.coinbase)
